@@ -4,7 +4,7 @@
 
 ---
 
-## 🚀 Installation
+### Installation
 
 Clone the repository:
 
@@ -13,7 +13,7 @@ git clone https://github.com/AtreeHeart/ImmunoMTL
 cd ImmunoMTL
 ```
 
-### 📆 Environment and Dependencies
+#### Environment and Dependencies
 
 The model was trained and evaluated on:
 
@@ -36,9 +36,9 @@ Dependencies for additional scripts are noted at the top of each script file.
 
 ---
 
-## 🔍 Usage
+### Usage
 
-### Predict with Pretrained Model
+#### Predict with Pretrained Model
 
 ```bash
 python predict.py --input path/to/input.csv --output path/to/output.csv
@@ -56,7 +56,7 @@ python predict.py --input path/to/input.csv --output path/to/output.csv
 
 ---
 
-## 💠 Additional Scripts
+### Additional Scripts
 
 A set of Python scripts are provided to support data preparation, training, and evaluation:
 
@@ -72,9 +72,9 @@ A set of Python scripts are provided to support data preparation, training, and 
 
 ---
 
-## Citation
+### Citation
 
-This package has been submitted for peer-reviewed publication
+This package has been submitted for peer-reviewed publication.
 Citation details will be available upon acceptance.
 
 
