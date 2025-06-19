@@ -1,11 +1,6 @@
-# MMS clustering README
-
 # **MMS Clustering**
 
 This folder contains the code, data, and models for the **MHC Motif Signature (MMS) Clustering** module, which serves as a key sub-component of the ImmunoMTL framework.
-![MMS Clustering Workflow](mms_pipeline.png)
-
-The goal of this module is to define, calculate, and cluster MHC alleles based on their peptide motif preferences.
 
 ## **Overview**
 
@@ -19,7 +14,18 @@ The pipeline works as follows:
 
 This clustering allows the multi-task learning (MTL) model to share information across similar MHC alleles during immunogenicity prediction.
 
-**Folder Structure**
+## Development Environment
+
+The following Python versions and libraries were used for running and validating this module:
+```text
+Python version:       3.7.13  
+pandas version:       1.3.4  
+numpy version:        1.21.5  
+scikit-learn version: 1.0.2  
+scipy version:        1.7.3
+```
+
+## Folder Structure
 
 ```php
 MMS_clustering/
@@ -30,7 +36,7 @@ MMS_clustering/
 ├── src/                   → Source Python scripts for data prep, clustering, validation
 ```
 
-**Key Scripts**
+## Key Scripts
 
 | **File** | **Description** |
 | --- | --- |
