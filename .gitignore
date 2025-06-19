@@ -1,0 +1,11 @@
+data/*
+bin/.tmp
+HLA/MHC_pseudo.dat
+analysis/*
+pred_results/*
+notebook/Merge_pred.ipynb
+MMS_clustering/results/*_pred_vs_true.csv
+MMS_clustering/results/per_cluster*
+MMS_clustering/results/MMS_entropy_by_position_and_cluster.csv
+MMS_clustering/data/*
+MMS_clustering/analysis/figures/*

@@ -1,0 +1,6 @@
+Model,ARI,MI,Accuracy,Misclassified Count
+kmeans_HLA5cluster.pkl,0.2768,0.674,0.6364,16
+kmeans_HLA4cluster.pkl,0.5534,0.834,0.8182,8
+gmm_HLA4cluster.pkl,-0.0086,0.1134,0.3409,29
+kmeans_HLA6cluster.pkl,0.3534,1.019,0.6818,14
+kmeans_HLA3cluster.pkl,0.4511,0.5115,0.7727,10
