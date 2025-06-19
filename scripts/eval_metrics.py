@@ -125,7 +125,7 @@ for file in dataset_files:
     # === Save Standard CSV ===
     out_df = pd.DataFrame(all_metrics)
     out_df = out_df[["Model", "AUROC", "AP", "F1"]]
-    out_df.to_csv(os.path.join(output_folder, f"{dataset_name}_metrics.csv"), index=False)
+    #out_df.to_csv(os.path.join(output_folder, f"{dataset_name}_metrics.csv"), index=False)
     print(f"[SAVED] {dataset_name}_metrics.csv")
 
 # === Save Bootstrap Results for BenchmarkSet ===
@@ -134,7 +134,7 @@ for setting in benchmark_bootstrap:
     for metric in ["AUROC", "AP", "F1"]:
         boot_df = pd.DataFrame(benchmark_bootstrap[setting][metric])
         safe_setting = setting.replace(":", "_")
-        boot_df.to_csv(os.path.join(output_folder, f"BenchmarkSet_bootstrap_{safe_setting}_{metric}.csv"), index=False)
+        #boot_df.to_csv(os.path.join(output_folder, f"BenchmarkSet_bootstrap_{safe_setting}_{metric}.csv"), index=False)
         print(f"[SAVED] BenchmarkSet_bootstrap_{setting}_{metric}.csv")
 
 # Collect and print the final metric tables

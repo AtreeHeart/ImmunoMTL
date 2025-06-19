@@ -174,5 +174,5 @@ print(zeroshot_data2["Label"].value_counts())
 # === Step 8: Export ===
 #training_final.to_csv("../data/training/training.csv", index=False)
 #vali_final.to_csv("../data/validation/benchmark.csv", index=False)
-zeroshot_data.to_csv("../data/validation/zeroshot_data.csv", index=False)
-zeroshot_data2.to_csv("../data/validation/zeroshot_data2.csv", index=False)
+#zeroshot_data.to_csv("../data/validation/zeroshot_data.csv", index=False)
+#zeroshot_data2.to_csv("../data/validation/zeroshot_data2.csv", index=False)
