@@ -2,10 +2,8 @@
 
 **ImmunoMTL** is a multi-task learning framework for immunogenicity prediction that leverages MHC-specific peptide presentation features.
 
+## Installation
 ---
-
-### Installation
-
 Clone the repository:
 
 ```bash
@@ -13,7 +11,7 @@ git clone https://github.com/AtreeHeart/ImmunoMTL
 cd ImmunoMTL
 ```
 
-#### Environment and Dependencies
+### Environment and Dependencies
 
 The model was trained and evaluated on:
 
@@ -34,11 +32,9 @@ transformers==4.46.3
 
 Dependencies for additional scripts are noted at the top of each script file.
 
+## Usage
 ---
-
-### Usage
-
-#### Predict with Pretrained Model
+### Predict with Pretrained Model
 
 ```bash
 python predict.py --input path/to/input.csv --output path/to/output.csv
@@ -54,7 +50,6 @@ python predict.py --input path/to/input.csv --output path/to/output.csv
 
 - `--model` *(optional)*: Path to a `.pt` model file. If not provided, default pretrained model is used.
 
----
 
 ### Additional Scripts
 
@@ -70,10 +65,9 @@ A set of Python scripts are provided to support data preparation, training, and 
 | `ImmunoSTL_training.py` | Train a single-task learning baseline model |
 | `eval_ImmunoMTL.py`, `eval_metrics.py`, etc. | Evaluate predictions and generate metrics |
 
+
+## Citation
 ---
-
-### Citation
-
 This package has been submitted for peer-reviewed publication.
 Citation details will be available upon acceptance.
 
