@@ -3,7 +3,6 @@
 **ImmunoMTL** is a multi-task learning framework for immunogenicity prediction that leverages MHC-specific peptide presentation features.
 
 ## Installation
----
 Clone the repository:
 
 ```bash
@@ -33,7 +32,6 @@ transformers==4.46.3
 Dependencies for additional scripts are noted at the top of each script file.
 
 ## Usage
----
 ### Predict with Pretrained Model
 
 ```bash
@@ -67,8 +65,9 @@ A set of Python scripts are provided to support data preparation, training, and 
 
 
 ## Citation
----
+
 This package has been submitted for peer-reviewed publication.
+
 Citation details will be available upon acceptance.
 
 
