@@ -9,3 +9,4 @@ MMS_clustering/results/per_cluster*
 MMS_clustering/results/MMS_entropy_by_position_and_cluster.csv
 MMS_clustering/data/*
 MMS_clustering/analysis/figures/*
+MMS_clustering/mms_pipeline.png
