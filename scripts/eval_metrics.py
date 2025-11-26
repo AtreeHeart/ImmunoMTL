@@ -49,7 +49,9 @@ folders = {
     "immunostl": "../pred_results/immunostl",
     "munis": "../pred_results/munis",
     "bigmhc": "../pred_results/bigmhc",
-    "prime2": "../pred_results/prime2"
+    "prime2": "../pred_results/prime2",
+    "netMHCpan": "../pred_results/netMHCpan",
+    "mhcflurry": "../pred_results/mhcflurry"
 }
 output_folder = "../analysis"
 os.makedirs(output_folder, exist_ok=True)
@@ -62,6 +64,8 @@ metric_columns = [
     ("BigMHC_IM", "BigMHC"),
     ("munis", "munis"),
     ("PRIME_score", "PRIME_score"),
+    ("netMHCpan", "netMHCpan"),
+    ("mhcflurry", "mhcflurry")
 ]
 
 benchmark_bootstrap = {
@@ -80,6 +84,8 @@ for file in dataset_files:
         "BigMHC_IM": ("bigmhc", "_bigmhc", "BigMHC_IM"),
         "munis": ("munis", "_munis_predictions", "score"),
         "PRIME_score": ("prime2", "_prime", "PRIME_score"),
+        "netMHCpan": ("netMHCpan", "_netMHCpan", "EL-score"),
+        "mhcflurry": ("mhcflurry", "_mhcflurry", "mhcflurry_presentation_score"),
     }
 
     for key, (folder_key, suffix, col) in external_tools.items():
@@ -106,7 +112,7 @@ for file in dataset_files:
                 result = calculate_metrics(labels, preds)
                 result.update({"Model": label})
                 all_metrics.append(result)
-
+                
                 # === Benchmark Bootstraps ===
                 if dataset_name == "BenchmarkSet":
                     for metric in ["AUROC", "AP", "F1"]:
@@ -125,7 +131,7 @@ for file in dataset_files:
     # === Save Standard CSV ===
     out_df = pd.DataFrame(all_metrics)
     out_df = out_df[["Model", "AUROC", "AP", "F1"]]
-    #out_df.to_csv(os.path.join(output_folder, f"{dataset_name}_metrics.csv"), index=False)
+    out_df.to_csv(os.path.join(output_folder, f"{dataset_name}_metrics.csv"), index=False)
     print(f"[SAVED] {dataset_name}_metrics.csv")
 
 # === Save Bootstrap Results for BenchmarkSet ===
@@ -134,7 +140,7 @@ for setting in benchmark_bootstrap:
     for metric in ["AUROC", "AP", "F1"]:
         boot_df = pd.DataFrame(benchmark_bootstrap[setting][metric])
         safe_setting = setting.replace(":", "_")
-        #boot_df.to_csv(os.path.join(output_folder, f"BenchmarkSet_bootstrap_{safe_setting}_{metric}.csv"), index=False)
+        boot_df.to_csv(os.path.join(output_folder, f"BenchmarkSet_bootstrap_{safe_setting}_{metric}.csv"), index=False)
         print(f"[SAVED] BenchmarkSet_bootstrap_{setting}_{metric}.csv")
 
 # Collect and print the final metric tables

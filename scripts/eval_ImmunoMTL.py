@@ -129,9 +129,12 @@ def evaluate_dataset(model, dataset, task_id=0, mhc="MHC", pep="Peptide", label=
             "Label": y_true,
             "ImmunoMTL_score": preds
         })
-        results_df = pd.concat([results_df, cluster_results], ignore_index=True)
+        #results_df = pd.concat([results_df, cluster_results], ignore_index=True)
+        frames = [df for df in [results_df, cluster_results] if not df.empty]
+        if frames:
+            results_df = pd.concat(frames, ignore_index=True)
     os.system("mkdir -p ../pred_results/immunomtl")
-    results_df.to_csv(f"../pred_results/immunomtl/{name}.csv", index=False)
+    #results_df.to_csv(f"../pred_results/immunomtl/{name}.csv", index=False)
     return overall_metrics
 
 

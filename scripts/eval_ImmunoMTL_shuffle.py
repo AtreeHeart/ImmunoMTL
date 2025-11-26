@@ -122,7 +122,10 @@ def evaluate_dataset(model, dataset, mhc="MHC", pep="Peptide", label="Label", na
             "Label": y_true,
             "Predicted Score": preds
         })
-        results_df = pd.concat([results_df, cluster_results], ignore_index=True)
+        #results_df = pd.concat([results_df, cluster_results], ignore_index=True)
+        frames = [df for df in [results_df, cluster_results] if not df.empty]
+        if frames:
+            results_df = pd.concat(frames, ignore_index=True)
     os.system("mkdir -p ../pred_results/immunomtl_shuffle")
     results_df.to_csv(f"../pred_results/immunomtl_shuffle/{name}.csv", index=False)
     return overall_metrics

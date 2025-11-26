@@ -54,6 +54,8 @@ external_tools = {
     "BigMHC_IM": ("../pred_results/bigmhc/BenchmarkSet_bigmhc.csv", "BigMHC_IM"),
     "munis": ("../pred_results/munis/BenchmarkSet_munis_predictions.csv", "score"),
     "PRIME_score": ("../pred_results/prime2/BenchmarkSet_prime.csv", "PRIME_score"),
+    "netMHCpan": ("../pred_results/netMHCpan/BenchmarkSet_netMHCpan.csv", "EL-score"),
+    "MHCflurry": ("../pred_results/mhcflurry/BenchmarkSet_mhcflurry.csv", "mhcflurry_presentation_score"),
 }
 for name, (path, col) in external_tools.items():
     if os.path.exists(path):

@@ -188,6 +188,11 @@ def train_mtl_model(df, seed=44, save_path="mtl_unified_model.pt"):
 
         if balanced:
             task_df = pd.concat(balanced).reset_index(drop=True)
+            n_total_bal = len(task_df)
+            n_pos_bal = (task_df['Label'] == 1).sum()
+            n_neg_bal = (task_df['Label'] == 0).sum()
+            print(f"[Balanced] Cluster {cluster} (Task {i+1}): {n_total_bal} samples (Pos: {n_pos_bal}, Neg: {n_neg_bal})")
+            task_df = pd.concat(balanced).reset_index(drop=True)
             task_df['strata'] = task_df['MHC'] + "_" + task_df['Label'].astype(str)
             train_df, val_df = train_test_split(task_df, test_size=0.15, stratify=task_df['strata'], random_state=seed)
 
@@ -256,15 +261,15 @@ def train_mtl_model(df, seed=44, save_path="mtl_unified_model.pt"):
 
         if avg_loss < best_loss:
             best_loss = avg_loss
-            torch.save(model.state_dict(), save_path)
-            print("[INFO] Best model saved.")
+            #torch.save(model.state_dict(), save_path)
+            #print("[INFO] Best model saved.")
 
     final_save_path = save_path.replace(".pt", "_last.pt")
-    torch.save(model.state_dict(), final_save_path)
-    print(f"[INFO] Final model saved to {final_save_path}")
+    #torch.save(model.state_dict(), final_save_path)
+    #print(f"[INFO] Final model saved to {final_save_path}")
 
     val_loss_df = pd.DataFrame(val_loss_log)
-    val_loss_df.to_csv(f"../models/loss_round{seed}.csv", index=False)
+    #val_loss_df.to_csv(f"../models/loss_round{seed}.csv", index=False)
 
     return model
 
