@@ -1,7 +1,11 @@
 data/*
 bin/.tmp
 HLA/MHC_pseudo.dat
-analysis/*
+# analysis: push notebooks, figures, bootstrap CSVs; exclude data and IS model weights
+analysis/Benchmark_immunostruct/models/
+analysis/Benchmark_immunostruct/data/
+analysis/feature_importance/data/MHCflurry_training.csv
+analysis/analysis/
 pred_results/*
 notebook/Merge_pred.ipynb
 MMS_clustering/results/*_pred_vs_true.csv
@@ -11,3 +15,16 @@ MMS_clustering/data/*
 MMS_clustering/analysis/figures/*
 MMS_clustering/mms_pipeline.png
 test/
+
+# ── Added: exclude temp outputs, old models, ablation checkpoints ─────────────
+.tmp/
+models/old/
+models/ImmunoABC_s22.pt
+models/ImmunoSTL_s22.pt
+models/JointSTL_s22.pt
+models/ImmunoShuffle_s*.pt
+models/ImmunoMTL_s44.pt
+
+# Jupyter checkpoints everywhere
+**/.ipynb_checkpoints/
+results/

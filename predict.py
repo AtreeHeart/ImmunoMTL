@@ -1,205 +1,293 @@
-# === Development Environment ===
+#!/usr/bin/env python3
 """
-Python version:       3.10.15 
-pandas version:       2.2.3
-numpy version:        1.26.4
-scikit-learn version: 1.5.1
-torch version: 2.5.1
-tqdm version: 4.67.1
-transformer version: 4.46.3
+predict.py — ImmunoMTL prediction script.
+
+Usage (prediction only):
+    python predict.py --input samples.csv --output predictions.csv
+
+Usage (prediction + evaluation):
+    python predict.py --input samples.csv --output predictions.csv --label Label
+
+Input CSV must have:
+  - Column 1: peptide sequences
+  - Column 2: MHC allele names  (e.g. HLA-A*02:01)
+  - Optional label column (0/1 integers) for evaluation mode
+
+Output CSV adds an 'ImmunoMTL_score' column (0–1 immunogenicity score).
+Rows with unsupported HLA alleles are retained with score=NaN.
+
+Python 3.10+ | torch 2.x | transformers 4.x | scikit-learn 1.x
 """
 
-# === Imports ===
 import os
-import torch
-import joblib
+import sys
 import argparse
+
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModel
 import torch
 import torch.nn as nn
+from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModel
 
-def esm_embed(seq, model, tokenizer, max_len=11, flatten=False):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    embeddings = []
+# ── Constants (must match ImmunoMTL_training.py) ──────────────────────────────
+ESM_ID  = "facebook/esm2_t12_35M_UR50D"
+ESM_DIM = 480
+PEP_LEN = 11
+MHC_LEN = 34
+N_TASKS = 4
 
-    for i in tqdm(range(0, len(seq), 64)):
-        # Add_special_tokens=False ensures no [CLS]/[SEP]
-        batch = tokenizer(seq[i:i+64], return_tensors="pt", padding="max_length", truncation=True,
-                          max_length=max_len, add_special_tokens=False).to(device)
-        with torch.no_grad():
-            #pep_tokens = output[:, 1:12, :]
-            output = model(**batch).last_hidden_state  # shape: [batch_size, max_len, 320]
-            embeddings.append(output.cpu())
-    return torch.cat(embeddings, dim=0)  # shape: [N, 11, 320]
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_MODEL   = os.path.join(SCRIPT_DIR, "models", "ImmunoMTL_s22.pt")
+DEFAULT_HLA_DIR = os.path.join(SCRIPT_DIR, "HLA")
 
-def add_mhc_pseudo_sequence(df, mhc_col='HLA', pseudo_file_path="HLA/MHC_pseudo.dat"):
-    def normalize_mhc_name(name): return name.replace("*", "").replace(":", "")
-    mhc_dict = {}
-    if not os.path.exists(pseudo_file_path):
-        raise FileNotFoundError(
-            "[ERROR] MHC pseudo sequence file not found.\n"
-            "Please install netMHCpan and copy 'MHC_pseudo.dat' to 'HLA/'"
+
+# ── Model architecture ────────────────────────────────────────────────────────
+class MTLModel(nn.Module):
+    def __init__(self, n_tasks=N_TASKS):
+        super().__init__()
+        self.pep1 = nn.LSTM(ESM_DIM, 64, batch_first=True, bidirectional=True)
+        self.pep2 = nn.LSTM(128,     64, batch_first=True, bidirectional=True)
+        self.mhc1 = nn.LSTM(ESM_DIM, 64, batch_first=True, bidirectional=True)
+        self.mhc2 = nn.LSTM(128,     64, batch_first=True, bidirectional=True)
+        self.shared = nn.Sequential(
+            nn.Linear(256, 64), nn.BatchNorm1d(64),
+            nn.LeakyReLU(), nn.Dropout(0.3),
+            nn.Linear(64, 16), nn.LeakyReLU(), nn.Dropout(0.2),
         )
-    with open(os.path.expanduser(pseudo_file_path), 'r') as f:
+        self.heads = nn.ModuleList([nn.Linear(16, 1) for _ in range(n_tasks)])
+
+    def forward(self, xp, xm):
+        p, _ = self.pep1(xp); p, _ = self.pep2(p); p = p[:, -1, :]
+        m, _ = self.mhc1(xm); m, _ = self.mhc2(m); m = m[:, -1, :]
+        s = self.shared(torch.cat([p, m], dim=1))
+        return [h(s).squeeze(-1) for h in self.heads]
+
+
+# ── HLA utilities ─────────────────────────────────────────────────────────────
+def load_hla_resources(hla_dir):
+    cluster_map    = pd.read_csv(os.path.join(hla_dir, "clustering_res.csv")).set_index("HLA")["cluster"].to_dict()
+    t2_cluster_map = pd.read_csv(os.path.join(hla_dir, "t2_cluster_res_c4.csv")).set_index("HLA")["assigned_cluster"].to_dict()
+
+    pseudo_map = {}
+    pseudo_file = os.path.join(hla_dir, "MHC_pseudo.dat")
+    if not os.path.exists(pseudo_file):
+        raise FileNotFoundError(
+            f"[ERROR] {pseudo_file} not found.\n"
+            "Please install netMHCpan and copy 'MHC_pseudo.dat' to the HLA/ directory."
+        )
+    with open(pseudo_file) as f:
         for line in f:
             parts = line.strip().split()
             if len(parts) == 2:
-                mhc, seq = parts
-                mhc_dict[mhc] = seq
+                pseudo_map[parts[0]] = parts[1]
 
-    # Create the new column with mapped pseudo sequences
-    def lookup_pseudo(mhc):
-        norm = normalize_mhc_name(mhc)
-        return mhc_dict.get(norm, None)
+    return cluster_map, t2_cluster_map, pseudo_map
+
+
+def annotate_hla(df, mhc_col, cluster_map, t2_cluster_map, pseudo_map):
+    def normalize(name):
+        return name.replace("*", "").replace(":", "")
 
     df = df.copy()
-    df['HLA_pseudo'] = df[mhc_col].apply(lookup_pseudo)
+    df["HLA_pseudo"]  = df[mhc_col].apply(lambda x: pseudo_map.get(normalize(str(x))))
+    df["_cluster_t1"] = df[mhc_col].map(cluster_map)
+    df["_cluster_t2"] = df[mhc_col].map(t2_cluster_map)
+    df["cluster"]     = df["_cluster_t1"].fillna(df["_cluster_t2"])
+    df["Note"]        = ""
+    df.loc[df["_cluster_t1"].isna() & df["_cluster_t2"].notna(), "Note"] = (
+        "Assigned from T2 cluster (9-mer MS data only; lower confidence)"
+    )
+    df.loc[df["cluster"].isna(), "Note"] = "Unsupported HLA allele"
+    # cluster known but no pseudo sequence (rare edge case in MHC_pseudo.dat)
+    df.loc[df["cluster"].notna() & df["HLA_pseudo"].isna(), "Note"] = (
+        "HLA allele not in pseudo-sequence database; score unavailable"
+    )
+    df = df.drop(columns=["_cluster_t1", "_cluster_t2"])
 
-    missing = df['HLA_pseudo'].isna().sum()
-    print(f"[INFO] Added 'HLA_pseudo' column. Missing sequences for {missing} entries.")
+    # Warn
+    unsupported = df[df["cluster"].isna()][mhc_col].value_counts()
+    no_pseudo   = df[df["cluster"].notna() & df["HLA_pseudo"].isna()][mhc_col].value_counts()
+    t2_only     = df[df["Note"].str.startswith("Assigned")][mhc_col].value_counts()
+    if not unsupported.empty:
+        print(f"[WARNING] {len(unsupported)} unsupported HLA allele(s) — rows kept with score=NaN:")
+        print("  " + ", ".join(unsupported.index.tolist()))
+    if not no_pseudo.empty:
+        print(f"[WARNING] {len(no_pseudo)} HLA allele(s) have no pseudo sequence — rows kept with score=NaN:")
+        print("  " + ", ".join(no_pseudo.index.tolist()))
+    if not t2_only.empty:
+        print(f"[NOTE] {len(t2_only)} HLA allele(s) mapped via T2 cluster (lower confidence):")
+        print("  " + ", ".join(t2_only.index.tolist()))
 
     return df
 
-class MultiTaskModel(nn.Module):
-    def __init__(self, num_tasks):
-        super().__init__()
-        self.peptide_lstm = nn.LSTM(input_size=320, hidden_size=64, batch_first=True, bidirectional=True)
-        self.peptide_lstm2 = nn.LSTM(input_size=128, hidden_size=64, batch_first=True, bidirectional=True)
-        self.mhc_lstm = nn.LSTM(input_size=320, hidden_size=64, batch_first=True, bidirectional=True)
-        self.mhc_lstm2 = nn.LSTM(input_size=128, hidden_size=64, batch_first=True, bidirectional=True)
-        self.shared = nn.Sequential(
-            nn.Linear(128 + 128, 32),
-            nn.BatchNorm1d(32),
-            nn.LeakyReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32, 8),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2)
-        )
-        self.heads = nn.ModuleList([nn.Sequential(nn.Linear(8, 1), nn.Sigmoid()) for _ in range(num_tasks)])
 
-    def forward(self, x_pep, x_mhc):
-        pep_lstm_out, _ = self.peptide_lstm(x_pep)
-        pep_lstm_out, _ = self.peptide_lstm2(pep_lstm_out)
-        pep_feat = pep_lstm_out[:, -1, :]
-        mhc_lstm_out, _ = self.mhc_lstm(x_mhc)
-        mhc_lstm_out, _ = self.mhc_lstm2(mhc_lstm_out)
-        mhc_feat = mhc_lstm_out[:, -1, :]
-        merged = torch.cat([pep_feat, mhc_feat], dim=1)
-        shared = self.shared(merged)
-        return [head(shared).squeeze(-1) for head in self.heads]
-
-# ==== Main Prediction Function ====
-def run_prediction(input_csv, output_csv, model_path, cluster_mapping, t2_cluster_mapping, cluster_ids):
-
-    # === Load trained model ===
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    model_path = "models/ImmunoMTL_r44.pt"
-    print(f"[INFO] Loading model from {model_path}")
-    model = MultiTaskModel(num_tasks=len(cluster_ids)).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-
-    # Load input
-    df = pd.read_csv(input_csv)
-    peptide_col = df.columns[0]
-    mhc_col = df.columns[1]
-    df = add_mhc_pseudo_sequence(df, mhc_col=mhc_col)
-
-    # Add cluster and t2 annotations
-    df["cluster"] = df[mhc_col].map(cluster_mapping)
-    df["t2_cluster"] = df[mhc_col].map(t2_cluster_mapping)  
-    # Assign final cluster
-    df["Final_Cluster"] = df["cluster"].fillna(df["t2_cluster"])
-
-    # Add notes
-    df["Note"] = ""
-    df.loc[df["cluster"].isna() & df["t2_cluster"].notna(), "Note"] = "Assigned from T2 cluster (9-mer mass spectrometry hits only; lower confidence)"
-    df.loc[df["Final_Cluster"].isna(), "Note"] = "Unsupported HLA"
-
-    # Warn unsupported and fallback HLAs
-    unsupported_hlas = df[df["Final_Cluster"].isna()][mhc_col].value_counts()
-    t2_only_hlas = df[(df["cluster"].isna()) & (df["t2_cluster"].notna())][mhc_col].value_counts()
-
-    if not unsupported_hlas.empty:
-        print("[WARNING] Unsupported HLA types (not in T1 or T2 clusters):")
-        print(unsupported_hlas.to_string())
-
-    if not t2_only_hlas.empty:
-        print("[NOTE] HLA types predicted using T2 cluster only (9-mer data):")
-        print(t2_only_hlas.to_string())
-
-    # Filter out rows without cluster
-    df_pred = df[df["Final_Cluster"].notna()].copy().reset_index(drop=True)
-
-    # Load ESM model
-    print("[INFO] Loading ESM2 model...")
-    tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t6_8M_UR50D")
-    esm_model = AutoModel.from_pretrained("facebook/esm2_t6_8M_UR50D").eval()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    esm_model.to(device)
-
-    # Embed sequences
-    print("[INFO] Embedding peptide sequences...")
-    pep_emb = esm_embed(df_pred[peptide_col].tolist(), esm_model, tokenizer, max_len=11).float()
-    print("[INFO] Embedding MHC pseudo sequences...")
-    mhc_emb = esm_embed(df_pred["HLA_pseudo"].tolist(), esm_model, tokenizer, max_len=34).float()
-
-    # Load prediction model
-    print("[INFO] Loading trained ImmunoMTL model...")
-    model = MultiTaskModel(num_tasks=len(cluster_ids)).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-
-    # Run predictions
-    print("[INFO] Running predictions...")
-    predictions = []
-    for cluster in sorted(df_pred["Final_Cluster"].unique()):
-        idxs = df_pred[df_pred["Final_Cluster"] == cluster].index
-        x_pep = pep_emb[idxs].to(device)
-        x_mhc = mhc_emb[idxs].to(device)
+# ── ESM2 embedding ────────────────────────────────────────────────────────────
+def embed_sequences(seqs, max_len, tok, esm, device, batch_size=64):
+    embs = []
+    for i in tqdm(range(0, len(seqs), batch_size), leave=False):
+        batch = tok(
+            seqs[i:i+batch_size], return_tensors="pt", padding="max_length",
+            truncation=True, max_length=max_len, add_special_tokens=False
+        ).to(device)
         with torch.no_grad():
-            outputs = model(x_pep, x_mhc)
-            task_id = cluster_ids.index(cluster)
-            preds = outputs[task_id].cpu().numpy()
-        predictions.extend(zip(idxs, preds))
+            embs.append(esm(**batch).last_hidden_state.cpu().numpy())
+    return np.concatenate(embs, axis=0)
 
-    # Merge predictions
-    pred_df = pd.DataFrame(predictions, columns=["index", "ImmunoMTL_score"]).set_index("index")
-    df_pred = df_pred.join(pred_df).sort_index()
 
-    # Recombine full table with missing rows retained
-    unsupported_rows = df[df["Final_Cluster"].isna()].copy()
-    unsupported_rows["ImmunoMTL_score"] = np.nan  # or "" if preferred
-    df_final = pd.concat([df_pred, unsupported_rows], ignore_index=True, sort=False)
+# ── Inference ─────────────────────────────────────────────────────────────────
+def run_inference(df_pred, pep_emb_map, mhc_emb_map, model, device):
+    # Use a Series so original (non-reset) indices are preserved for merge-back.
+    scores = pd.Series(np.nan, index=df_pred.index, dtype=float)
+    for tid in range(N_TASKS):
+        sub = df_pred[df_pred["cluster"] == tid]
+        if len(sub) == 0:
+            continue
+        pe  = torch.tensor(np.stack([pep_emb_map[p] for p in sub["Peptide_seq"]]),  dtype=torch.float32)
+        me  = torch.tensor(np.stack([mhc_emb_map[m] for m in sub["HLA_pseudo"]]),   dtype=torch.float32)
+        out = []
+        for i in range(0, len(pe), 512):
+            with torch.no_grad():
+                logits = model(pe[i:i+512].to(device), me[i:i+512].to(device))
+            out.append(torch.sigmoid(logits[tid]).cpu().numpy())
+        scores.loc[sub.index] = np.concatenate(out)
+    return scores
 
-    df_final = df_final.drop(columns=["cluster", "t2_cluster", "HLA_pseudo"])
-    df_final.to_csv(output_csv, index=False)
-    print(f"[INFO] Saved predictions to: {output_csv}")
 
-# ==== CLI Interface ====
+# ── Metrics ───────────────────────────────────────────────────────────────────
+def ppvn(y, p):
+    """Mean precision over top-k predictions, k = 1 .. num_positives."""
+    idx      = np.argsort(p)[::-1]
+    y_sorted = y[idx]
+    cum_tp   = np.cumsum(y_sorted)
+    prec     = cum_tp / np.arange(1, len(y_sorted) + 1)
+    num_pos  = int(y_sorted.sum())
+    if num_pos == 0:
+        return np.nan
+    return float(np.mean(prec[:num_pos]))
+
+
+def validate_label_column(df, label_col):
+    if label_col not in df.columns:
+        sys.exit(f"[ERROR] Label column '{label_col}' not found in input CSV.\n"
+                 f"Available columns: {list(df.columns)}")
+    col = df[label_col]
+    if col.isna().any():
+        n = col.isna().sum()
+        sys.exit(f"[ERROR] Label column '{label_col}' has {n} missing value(s). "
+                 "All rows must have a label for evaluation.")
+    bad = ~col.isin([0, 1])
+    if bad.any():
+        vals = col[bad].unique().tolist()
+        sys.exit(f"[ERROR] Label column '{label_col}' contains non-binary values: {vals}. "
+                 "Only 0 and 1 are accepted.")
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description="Run ImmunoMTL prediction on input CSV")
-    parser.add_argument(
-        "--input", 
-        type=str, 
-        required=True, 
-        help="Path to input CSV with the first column as peptide and the second column as MHC. Example: KTFPPTEPK,HLA-A*03:01. The first row should contain the header."
+    parser = argparse.ArgumentParser(
+        description="ImmunoMTL: predict T-cell immunogenicity of peptide-MHC pairs."
     )
-    parser.add_argument("--output", type=str, required=True, help="Path to save prediction CSV")
-    parser.add_argument("--model", type=str, default="models/ImmunoMTL_r44.pt", help="Path to trained model weights (.pt file)")    
+    parser.add_argument("--input",  required=True,
+                        help="Input CSV. First column = peptide, second column = MHC allele.")
+    parser.add_argument("--output", required=True,
+                        help="Output CSV path (scores appended as 'ImmunoMTL_score').")
+    parser.add_argument("--model",  default=DEFAULT_MODEL,
+                        help=f"Path to model weights (default: {DEFAULT_MODEL})")
+    parser.add_argument("--hla_dir", default=DEFAULT_HLA_DIR,
+                        help=f"Directory containing HLA resource files (default: {DEFAULT_HLA_DIR})")
+    parser.add_argument("--label", default=None,
+                        help="Column name in input CSV containing 0/1 ground-truth labels. "
+                             "When provided, AUROC, AP, and PPVn are reported after prediction.")
     args = parser.parse_args()
 
-    cluster_mapping = pd.read_csv("HLA/clustering_res.csv").set_index("HLA")["cluster"].to_dict()
-    t2_cluster_mapping = pd.read_csv("HLA/t2_cluster_res_c4.csv").set_index("HLA")["assigned_cluster"].to_dict()
-    cluster_ids = joblib.load("models/cluster_ids.pkl")
+    # ── Load input ────────────────────────────────────────────────────────────
+    df = pd.read_csv(args.input)
+    pep_col = df.columns[0]
+    mhc_col = df.columns[1]
+    print(f"[INFO] Loaded {len(df)} rows  |  peptide='{pep_col}'  mhc='{mhc_col}'")
 
-    run_prediction(args.input, args.output, args.model, cluster_mapping, t2_cluster_mapping, cluster_ids)
+    if args.label:
+        validate_label_column(df, args.label)
+        print(f"[INFO] Evaluation mode: label column = '{args.label}'")
+
+    # ── HLA annotation ────────────────────────────────────────────────────────
+    cluster_map, t2_cluster_map, pseudo_map = load_hla_resources(args.hla_dir)
+    df = annotate_hla(df, mhc_col, cluster_map, t2_cluster_map, pseudo_map)
+    df["Peptide_seq"] = df[pep_col]   # alias used internally
+
+    # Rows need both a cluster assignment AND a pseudo sequence to get a score.
+    can_score = df["cluster"].notna() & df["HLA_pseudo"].notna()
+    df_pred = df[can_score].copy()
+    df_pred["cluster"] = df_pred["cluster"].astype(int)
+    n_skip = len(df) - len(df_pred)
+    print(f"[INFO] {len(df_pred)} rows with supported HLA  |  {n_skip} skipped (unsupported)")
+
+    if len(df_pred) == 0:
+        sys.exit("[ERROR] No rows with supported HLA alleles. Check your MHC column format "
+                 "(expected e.g. HLA-A*02:01).")
+
+    # ── ESM2 embeddings ───────────────────────────────────────────────────────
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] Device: {device}")
+    print(f"[INFO] Loading ESM2 ({ESM_ID}) ...")
+    tok = AutoTokenizer.from_pretrained(ESM_ID)
+    esm = AutoModel.from_pretrained(ESM_ID).eval().to(device)
+
+    uniq_peps = sorted(df_pred["Peptide_seq"].unique().tolist())
+    uniq_mhcs = sorted(df_pred["HLA_pseudo"].unique().tolist())
+    print(f"[INFO] Embedding {len(uniq_peps)} unique peptides ...")
+    pep_embs = embed_sequences(uniq_peps, PEP_LEN, tok, esm, device)
+    print(f"[INFO] Embedding {len(uniq_mhcs)} unique MHC pseudo-sequences ...")
+    mhc_embs = embed_sequences(uniq_mhcs, MHC_LEN, tok, esm, device)
+
+    pep_emb_map = dict(zip(uniq_peps, pep_embs))
+    mhc_emb_map = dict(zip(uniq_mhcs, mhc_embs))
+    del esm; torch.cuda.empty_cache()
+
+    # ── Load model ────────────────────────────────────────────────────────────
+    print(f"[INFO] Loading checkpoint: {args.model}")
+    model = MTLModel(n_tasks=N_TASKS).to(device)
+    model.load_state_dict(torch.load(args.model, map_location=device))
+    model.eval()
+
+    # ── Inference ─────────────────────────────────────────────────────────────
+    print("[INFO] Running predictions ...")
+    scores = run_inference(df_pred, pep_emb_map, mhc_emb_map, model, device)
+
+    # Assign scores back into the original df — preserves input row order.
+    df["ImmunoMTL_score"] = np.nan
+    df.loc[scores.index, "ImmunoMTL_score"] = scores.values
+    df_out = df.drop(columns=["HLA_pseudo", "cluster", "Peptide_seq"], errors="ignore")
+
+    df_out.to_csv(args.output, index=False)
+    print(f"[INFO] Saved {len(df_out)} rows → {args.output}")
+
+    # ── Evaluation (optional) ─────────────────────────────────────────────────
+    if args.label:
+        from sklearn.metrics import roc_auc_score, average_precision_score
+
+        eval_df = df.loc[scores.index].copy()
+        eval_df["ImmunoMTL_score"] = scores.values
+        eval_df = eval_df.dropna(subset=["ImmunoMTL_score"])
+        y = eval_df[args.label].values.astype(float)
+        p = eval_df["ImmunoMTL_score"].values.astype(float)
+
+        if y.sum() == 0 or y.sum() == len(y):
+            print("[WARNING] Evaluation skipped: labels are all one class after HLA filtering.")
+        else:
+            auroc = roc_auc_score(y, p)
+            ap    = average_precision_score(y, p)
+            pv    = ppvn(y, p)
+            n_pos = int(y.sum())
+            n_tot = len(y)
+            print(f"\n{'─'*42}")
+            print(f"  Evaluation on {n_tot} rows ({n_pos} positives)")
+            print(f"  AUROC : {auroc:.4f}")
+            print(f"  AP    : {ap:.4f}")
+            print(f"  PPVn  : {pv:.4f}")
+            print(f"{'─'*42}\n")
+
 
 if __name__ == "__main__":
     main()
