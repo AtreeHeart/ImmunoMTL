@@ -14,9 +14,9 @@ cd ImmunoMTL
 
 The model was trained and evaluated on:
 
-- **GPU**: NVIDIA RTX 3090  
-- **OS**: Ubuntu 20.04  
-- **Python**: 3.10.15
+- **GPU**: NVIDIA RTX PRO 4500 Blackwell  
+- **OS**: Ubuntu 24.04  
+- **Python**: 3.10.20
 
 Essential packages for running the pre-trained MTL model (`predict.py`):
 
@@ -36,13 +36,23 @@ python predict.py --input path/to/input.csv --output path/to/output.csv
 
 **Arguments:**
 
-| Argument | Required | Description |
+| Argument&nbsp;&nbsp; | Required | Description |
 |----------|----------|-------------|
 | `--input` | Yes | Path to input CSV. Must contain columns `Peptide` (e.g., `KTFPPTEPK`) and `MHC` (e.g., `HLA-A*03:01`). |
 | `--output` | Yes | Output path for predictions in CSV format. |
 | `--model` | No | Path to a `.pt` model weights file. Defaults to `models/ImmunoMTL_s22.pt`. |
 | `--hla_dir` | No | Directory containing HLA resource files. Defaults to `HLA/`. |
 | `--label` | No | Column name in the input CSV with 0/1 ground-truth labels. When provided, AUROC, AP, and PPVn are reported. |
+
+**Preparing the HLA resource folder**
+
+The `HLA/` directory (used by `--hla_dir`) ships with the repository and contains the MMS cluster assignment files (`clustering_res.csv`, `t2_cluster_res_c4.csv`). One additional file is required before running predictions:
+
+- `MHC_pseudo.dat` — HLA pseudo-sequence definitions from [netMHCpan](https://services.healthtech.dtu.dk/services/NetMHCpan-4.1/). After installing netMHCpan, copy the file to the `HLA/` directory:
+
+```bash
+cp /path/to/netMHCpan-4.1/data/MHC_pseudo.dat HLA/
+```
 
 ### Additional Scripts
 
